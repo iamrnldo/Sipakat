@@ -1,0 +1,9 @@
+node_modules/
+.env
+uploads/documents/*
+uploads/photos/*
+uploads/keuangan/*
+!uploads/documents/.gitkeep
+!uploads/photos/.gitkeep
+!uploads/keuangan/.gitkeep
+*.log
