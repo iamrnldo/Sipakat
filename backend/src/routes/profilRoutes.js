@@ -8,6 +8,7 @@ const {
   getAllUsers,
   createUser,
   updateUserAdmin,
+  deleteUser,
 } = require("../controllers/profilController");
 const { protect, adminOnly } = require("../middleware/authMiddleware");
 const { uploadPhoto } = require("../middleware/uploadMiddleware");
@@ -34,5 +35,8 @@ router.post("/users", protect, adminOnly, createUser);
 
 // @route   PATCH /api/profil/users/:id
 router.patch("/users/:id", protect, adminOnly, updateUserAdmin);
+
+// @route   DELETE /api/profil/users/:id
+router.delete("/users/:id", protect, adminOnly, deleteUser);
 
 module.exports = router;

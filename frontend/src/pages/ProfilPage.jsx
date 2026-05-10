@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   HiPencilSquare,
   HiLockClosed,
@@ -7,6 +7,9 @@ import {
   HiShieldCheck,
   HiUser,
   HiPlus,
+  HiTrash,
+  HiMagnifyingGlass,
+  HiXMark,
 } from "react-icons/hi2";
 
 import { profilApi } from "../api/profilApi";
@@ -75,6 +78,9 @@ function EditProfilForm({ profil, onSubmit, loading }) {
                        file:rounded-lg file:border-0 file:text-xs file:font-medium
                        file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
           />
+          <p className="text-xs text-slate-400 mt-1">
+            Maks. 5MB · JPG, PNG, WEBP
+          </p>
         </div>
       </div>
 
@@ -85,6 +91,7 @@ function EditProfilForm({ profil, onSubmit, loading }) {
             className="input-field"
             value={form.nama_lengkap}
             onChange={set("nama_lengkap")}
+            required
           />
         </div>
         <div>
@@ -94,6 +101,7 @@ function EditProfilForm({ profil, onSubmit, loading }) {
             className="input-field"
             value={form.email}
             onChange={set("email")}
+            required
           />
         </div>
         <div>
@@ -148,16 +156,28 @@ function ChangePasswordForm({ onSubmit, loading }) {
     password_baru: "",
     konfirmasi_password: "",
   });
-  const set = (k) => (e) => setForm((p) => ({ ...p, [k]: e.target.value }));
+  const [error, setError] = useState("");
+
+  const set = (k) => (e) => {
+    setError("");
+    setForm((p) => ({ ...p, [k]: e.target.value }));
+  };
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (form.password_baru !== form.konfirmasi_password) {
+      setError("Password baru dan konfirmasi tidak cocok");
+      return;
+    }
+    if (form.password_baru.length < 6) {
+      setError("Password baru minimal 6 karakter");
+      return;
+    }
+    onSubmit(form);
+  };
 
   return (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault();
-        onSubmit(form);
-      }}
-      className="p-6 space-y-4"
-    >
+    <form onSubmit={handleSubmit} className="p-6 space-y-4">
       {[
         { key: "password_lama", label: "Password Lama" },
         { key: "password_baru", label: "Password Baru" },
@@ -171,10 +191,14 @@ function ChangePasswordForm({ onSubmit, loading }) {
             value={form[key]}
             onChange={set(key)}
             required
-            minLength={key !== "password_lama" ? 6 : 1}
           />
         </div>
       ))}
+      {error && (
+        <p className="text-sm text-red-500 bg-red-50 px-3 py-2 rounded-lg">
+          {error}
+        </p>
+      )}
       <div className="flex justify-end pt-2 border-t border-slate-100">
         <button type="submit" className="btn-primary" disabled={loading}>
           {loading ? "Menyimpan..." : "Ubah Password"}
@@ -193,6 +217,8 @@ function CreateUserForm({ onSubmit, loading }) {
     password: "",
     jabatan: "",
     hak_akses: "user",
+    no_hp: "",
+    alamat: "",
   });
   const set = (k) => (e) => setForm((p) => ({ ...p, [k]: e.target.value }));
 
@@ -274,6 +300,22 @@ function CreateUserForm({ onSubmit, loading }) {
             ))}
           </select>
         </div>
+        <div>
+          <label className="label">No HP</label>
+          <input
+            className="input-field"
+            value={form.no_hp}
+            onChange={set("no_hp")}
+          />
+        </div>
+        <div>
+          <label className="label">Alamat</label>
+          <input
+            className="input-field"
+            value={form.alamat}
+            onChange={set("alamat")}
+          />
+        </div>
       </div>
       <div className="flex justify-end pt-2 border-t border-slate-100">
         <button type="submit" className="btn-primary" disabled={loading}>
@@ -281,6 +323,35 @@ function CreateUserForm({ onSubmit, loading }) {
         </button>
       </div>
     </form>
+  );
+}
+
+// ── Confirm Delete Modal ──────────────────────────────────────────
+function ConfirmDeleteModal({ user: targetUser, onConfirm, onClose, loading }) {
+  if (!targetUser) return null;
+  return (
+    <div className="p-6 space-y-4">
+      <p className="text-sm text-slate-600">
+        Anda yakin ingin menghapus user{" "}
+        <span className="font-semibold text-slate-800">
+          {targetUser.nama_lengkap}
+        </span>{" "}
+        (<span className="text-slate-500">@{targetUser.username}</span>)?
+        Tindakan ini tidak dapat dibatalkan.
+      </p>
+      <div className="flex justify-end gap-3 pt-2 border-t border-slate-100">
+        <button onClick={onClose} className="btn-secondary" disabled={loading}>
+          Batal
+        </button>
+        <button
+          onClick={onConfirm}
+          disabled={loading}
+          className="px-4 py-2 rounded-xl text-sm font-medium bg-red-600 text-white hover:bg-red-700 transition-colors disabled:opacity-50"
+        >
+          {loading ? "Menghapus..." : "Ya, Hapus"}
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -295,11 +366,17 @@ export default function ProfilPage() {
   const [perangkat, setPerangkat] = useState([]);
   const [users, setUsers] = useState([]);
   const [aktPagination, setAktPag] = useState(null);
+  const [userPagination, setUserPag] = useState(null);
+  const [userSearch, setUserSearch] = useState("");
+  const [userPage, setUserPage] = useState(1);
+
   const [loading, setLoading] = useState(true);
+  const [tabLoading, setTabLoading] = useState(false);
   const [tab, setTab] = useState("profil");
-  const [modal, setModal] = useState({ type: null });
+  const [modal, setModal] = useState({ type: null, data: null });
   const [submitting, setSub] = useState(false);
 
+  // Initial profil load
   useEffect(() => {
     profilApi
       .getProfil()
@@ -308,28 +385,62 @@ export default function ProfilPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  const loadAktivitas = async (page = 1) => {
-    const res = await profilApi.getAktivitas({ page, limit: 15 });
-    setAktivitas(res.data.data);
-    setAktPag(res.data.pagination);
-  };
+  // Tab data loaders
+  const loadAktivitas = useCallback(async (page = 1) => {
+    setTabLoading(true);
+    try {
+      const res = await profilApi.getAktivitas({ page, limit: 15 });
+      setAktivitas(res.data.data);
+      setAktPag(res.data.pagination);
+    } catch {
+      toast.error("Gagal memuat aktivitas");
+    } finally {
+      setTabLoading(false);
+    }
+  }, []);
 
-  const loadPerangkat = async () => {
-    const res = await profilApi.getPerangkat();
-    setPerangkat(res.data.data);
-  };
+  const loadPerangkat = useCallback(async () => {
+    setTabLoading(true);
+    try {
+      const res = await profilApi.getPerangkat();
+      setPerangkat(res.data.data);
+    } catch {
+      toast.error("Gagal memuat perangkat");
+    } finally {
+      setTabLoading(false);
+    }
+  }, []);
 
-  const loadUsers = async () => {
-    const res = await profilApi.getAllUsers();
-    setUsers(res.data.data);
-  };
+  const loadUsers = useCallback(async (page = 1, search = "") => {
+    setTabLoading(true);
+    try {
+      const res = await profilApi.getAllUsers({ page, limit: 10, search });
+      setUsers(res.data.data);
+      setUserPag(res.data.pagination);
+    } catch {
+      toast.error("Gagal memuat data user");
+    } finally {
+      setTabLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    if (tab === "aktivitas") loadAktivitas();
+    if (tab === "aktivitas") loadAktivitas(1);
     if (tab === "perangkat") loadPerangkat();
-    if (tab === "users" && isAdmin) loadUsers();
+    if (tab === "users" && isAdmin) loadUsers(1, "");
   }, [tab]);
 
+  // User search with debounce
+  useEffect(() => {
+    if (tab !== "users") return;
+    const t = setTimeout(() => {
+      setUserPage(1);
+      loadUsers(1, userSearch);
+    }, 400);
+    return () => clearTimeout(t);
+  }, [userSearch]);
+
+  // ── Handlers ──────────────────────────────────────────────────
   const handleUpdateProfil = async (fd) => {
     setSub(true);
     try {
@@ -339,7 +450,7 @@ export default function ProfilPage() {
       toast.success("Profil berhasil diperbarui");
       setModal({ type: null });
     } catch (e) {
-      toast.error(e.response?.data?.message || "Gagal memperbarui");
+      toast.error(e.response?.data?.message || "Gagal memperbarui profil");
     } finally {
       setSub(false);
     }
@@ -364,7 +475,7 @@ export default function ProfilPage() {
       await profilApi.createUser(data);
       toast.success("User berhasil dibuat");
       setModal({ type: null });
-      loadUsers();
+      loadUsers(userPage, userSearch);
     } catch (e) {
       toast.error(e.response?.data?.message || "Gagal membuat user");
     } finally {
@@ -376,21 +487,52 @@ export default function ProfilPage() {
     const newStatus = u.status === "aktif" ? "nonaktif" : "aktif";
     try {
       await profilApi.updateUser(u.id, { status: newStatus });
-      toast.success(`User ${newStatus}kan`);
-      loadUsers();
+      toast.success(
+        `User berhasil di${newStatus === "aktif" ? "aktifkan" : "nonaktifkan"}`,
+      );
+      loadUsers(userPage, userSearch);
     } catch {
-      toast.error("Gagal mengubah status");
+      toast.error("Gagal mengubah status user");
     }
   };
 
+  const handleDeleteUser = async () => {
+    if (!modal.data) return;
+    setSub(true);
+    try {
+      await profilApi.deleteUser(modal.data.id);
+      toast.success("User berhasil dihapus");
+      setModal({ type: null });
+      loadUsers(userPage, userSearch);
+    } catch (e) {
+      toast.error(e.response?.data?.message || "Gagal menghapus user");
+    } finally {
+      setSub(false);
+    }
+  };
+
+  const handleUserPageChange = (page) => {
+    setUserPage(page);
+    loadUsers(page, userSearch);
+  };
+
+  // ── Tabs config ───────────────────────────────────────────────
   const tabs = [
     { key: "profil", label: "Profil", icon: HiUser },
-    { key: "aktivitas", label: "Aktivitas", icon: HiClockHistory },
+    { key: "aktivitas", label: "Aktivitas", icon: HiClock },
     { key: "perangkat", label: "Perangkat", icon: HiDevicePhoneMobile },
     ...(isAdmin
       ? [{ key: "users", label: "Kelola User", icon: HiShieldCheck }]
       : []),
   ];
+
+  const MODUL_COLOR = {
+    AUTH: "bg-slate-100 text-slate-600",
+    ARSIP: "bg-blue-100 text-blue-700",
+    KEPEGAWAIAN: "bg-green-100 text-green-700",
+    KEUANGAN: "bg-amber-100 text-amber-700",
+    PROFIL: "bg-purple-100 text-purple-700",
+  };
 
   if (loading)
     return (
@@ -413,7 +555,7 @@ export default function ProfilPage() {
             {profil?.foto ? (
               <img
                 src={`http://localhost:5000${profil.foto}`}
-                alt=""
+                alt={profil.nama_lengkap}
                 className="h-full w-full object-cover"
               />
             ) : (
@@ -434,7 +576,7 @@ export default function ProfilPage() {
               <StatusBadge status={profil?.status} />
             </div>
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
             <button
               onClick={() => setModal({ type: "edit" })}
               className="btn-secondary"
@@ -469,8 +611,15 @@ export default function ProfilPage() {
           ))}
         </div>
 
+        {/* Tab loading overlay */}
+        {tabLoading && (
+          <div className="flex justify-center py-10">
+            <LoadingSpinner size="md" />
+          </div>
+        )}
+
         {/* Tab: Profil */}
-        {tab === "profil" && profil && (
+        {!tabLoading && tab === "profil" && profil && (
           <div className="p-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
             {[
               ["Nama Lengkap", profil.nama_lengkap],
@@ -482,6 +631,7 @@ export default function ProfilPage() {
               ["Status Akun", <StatusBadge status={profil.status} />],
               ["Terakhir Login", formatDateTime(profil.last_login)],
               ["Dibuat", formatDateTime(profil.created_at)],
+              ["Diperbarui", formatDateTime(profil.updated_at)],
             ].map(([label, val]) => (
               <div key={label} className="p-3 bg-slate-50 rounded-xl">
                 <p className="text-xs text-slate-400 font-medium mb-1">
@@ -510,7 +660,7 @@ export default function ProfilPage() {
         )}
 
         {/* Tab: Aktivitas */}
-        {tab === "aktivitas" && (
+        {!tabLoading && tab === "aktivitas" && (
           <div>
             {aktivitas.length === 0 ? (
               <div className="py-16 text-center text-slate-400 text-sm">
@@ -526,15 +676,7 @@ export default function ProfilPage() {
                     >
                       <span
                         className={`shrink-0 mt-0.5 px-2 py-0.5 rounded-md text-xs font-medium
-                        ${
-                          {
-                            AUTH: "bg-slate-100 text-slate-600",
-                            ARSIP: "bg-blue-100 text-blue-700",
-                            KEPEGAWAIAN: "bg-green-100 text-green-700",
-                            KEUANGAN: "bg-amber-100 text-amber-700",
-                            PROFIL: "bg-purple-100 text-purple-700",
-                          }[a.modul] || "bg-slate-100 text-slate-600"
-                        }`}
+                          ${MODUL_COLOR[a.modul] || "bg-slate-100 text-slate-600"}`}
                       >
                         {a.modul}
                       </span>
@@ -557,7 +699,7 @@ export default function ProfilPage() {
         )}
 
         {/* Tab: Perangkat */}
-        {tab === "perangkat" && (
+        {!tabLoading && tab === "perangkat" && (
           <div className="divide-y divide-slate-100">
             {perangkat.length === 0 ? (
               <div className="py-16 text-center text-slate-400 text-sm">
@@ -574,9 +716,12 @@ export default function ProfilPage() {
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-slate-700">
-                      {p.browser || "Unknown"} · {p.os || "Unknown"}
+                      {p.browser || "Unknown Browser"} · {p.os || "Unknown OS"}
                     </p>
-                    <p className="text-xs text-slate-400">
+                    {p.device_info && (
+                      <p className="text-xs text-slate-500">{p.device_info}</p>
+                    )}
+                    <p className="text-xs text-slate-400 mt-0.5">
                       {p.ip_address} · {formatDateTime(p.created_at)}
                     </p>
                   </div>
@@ -596,104 +741,151 @@ export default function ProfilPage() {
         )}
 
         {/* Tab: Kelola User (Admin) */}
-        {tab === "users" && isAdmin && (
+        {!tabLoading && tab === "users" && isAdmin && (
           <div>
-            <div className="px-4 py-3 border-b border-slate-100 flex justify-end">
+            {/* Toolbar */}
+            <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between gap-3 flex-wrap">
+              <div className="relative flex-1 min-w-[200px] max-w-xs">
+                <HiMagnifyingGlass className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Cari nama, username, email..."
+                  value={userSearch}
+                  onChange={(e) => setUserSearch(e.target.value)}
+                  className="input-field pl-9 pr-8 py-2 text-sm"
+                />
+                {userSearch && (
+                  <button
+                    onClick={() => setUserSearch("")}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                  >
+                    <HiXMark className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
               <button
                 onClick={() => setModal({ type: "create-user" })}
-                className="btn-primary"
+                className="btn-primary shrink-0"
               >
                 <HiPlus className="h-4 w-4" /> Buat User
               </button>
             </div>
+
             {users.length === 0 ? (
               <div className="py-16 text-center text-slate-400 text-sm">
-                Belum ada user
+                {userSearch ? "Tidak ada user yang cocok" : "Belum ada user"}
               </div>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="bg-slate-50 border-b border-slate-200">
-                      <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">
-                        Nama
-                      </th>
-                      <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase hidden md:table-cell">
-                        Email
-                      </th>
-                      <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">
-                        Hak Akses
-                      </th>
-                      <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">
-                        Status
-                      </th>
-                      <th className="text-right px-4 py-3 text-xs font-semibold text-slate-500 uppercase">
-                        Aksi
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {users.map((u) => (
-                      <tr key={u.id} className="table-row-hover">
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-2">
-                            <div className="h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center text-xs font-bold text-blue-600 overflow-hidden">
-                              {u.foto ? (
-                                <img
-                                  src={`http://localhost:5000${u.foto}`}
-                                  alt=""
-                                  className="h-full w-full object-cover"
-                                />
-                              ) : (
-                                getInitials(u.nama_lengkap)
-                              )}
-                            </div>
-                            <div>
-                              <p className="font-medium text-slate-800">
-                                {u.nama_lengkap}
-                              </p>
-                              <p className="text-xs text-slate-400">
-                                @{u.username}
-                              </p>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 text-slate-500 hidden md:table-cell">
-                          {u.email}
-                        </td>
-                        <td className="px-4 py-3">
-                          <HakAksesBadge hak={u.hak_akses} />
-                        </td>
-                        <td className="px-4 py-3">
-                          <StatusBadge status={u.status} />
-                        </td>
-                        <td className="px-4 py-3 text-right">
-                          {u.id !== user.id && (
-                            <button
-                              onClick={() => handleToggleStatus(u)}
-                              className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-colors ${
-                                u.status === "aktif"
-                                  ? "bg-red-50 text-red-600 hover:bg-red-100"
-                                  : "bg-green-50 text-green-600 hover:bg-green-100"
-                              }`}
-                            >
-                              {u.status === "aktif"
-                                ? "Nonaktifkan"
-                                : "Aktifkan"}
-                            </button>
-                          )}
-                        </td>
+              <>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-slate-50 border-b border-slate-200">
+                        <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">
+                          Nama
+                        </th>
+                        <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase hidden md:table-cell">
+                          Email
+                        </th>
+                        <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase hidden lg:table-cell">
+                          Jabatan
+                        </th>
+                        <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">
+                          Hak Akses
+                        </th>
+                        <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">
+                          Status
+                        </th>
+                        <th className="text-right px-4 py-3 text-xs font-semibold text-slate-500 uppercase">
+                          Aksi
+                        </th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {users.map((u) => (
+                        <tr key={u.id} className="table-row-hover">
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-2">
+                              <div className="h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center text-xs font-bold text-blue-600 overflow-hidden shrink-0">
+                                {u.foto ? (
+                                  <img
+                                    src={`http://localhost:5000${u.foto}`}
+                                    alt=""
+                                    className="h-full w-full object-cover"
+                                  />
+                                ) : (
+                                  getInitials(u.nama_lengkap)
+                                )}
+                              </div>
+                              <div>
+                                <p className="font-medium text-slate-800">
+                                  {u.nama_lengkap}
+                                </p>
+                                <p className="text-xs text-slate-400">
+                                  @{u.username}
+                                </p>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-slate-500 hidden md:table-cell">
+                            {u.email}
+                          </td>
+                          <td className="px-4 py-3 text-slate-500 hidden lg:table-cell">
+                            {u.jabatan || "-"}
+                          </td>
+                          <td className="px-4 py-3">
+                            <HakAksesBadge hak={u.hak_akses} />
+                          </td>
+                          <td className="px-4 py-3">
+                            <StatusBadge status={u.status} />
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            {u.id !== user.id ? (
+                              <div className="flex items-center justify-end gap-2">
+                                <button
+                                  onClick={() => handleToggleStatus(u)}
+                                  className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-colors ${
+                                    u.status === "aktif"
+                                      ? "bg-amber-50 text-amber-600 hover:bg-amber-100"
+                                      : "bg-green-50 text-green-600 hover:bg-green-100"
+                                  }`}
+                                >
+                                  {u.status === "aktif"
+                                    ? "Nonaktifkan"
+                                    : "Aktifkan"}
+                                </button>
+                                <button
+                                  onClick={() =>
+                                    setModal({ type: "delete-user", data: u })
+                                  }
+                                  className="text-xs px-2 py-1.5 rounded-lg font-medium transition-colors bg-red-50 text-red-600 hover:bg-red-100"
+                                  title="Hapus user"
+                                >
+                                  <HiTrash className="h-4 w-4" />
+                                </button>
+                              </div>
+                            ) : (
+                              <span className="text-xs text-slate-400 italic">
+                                Anda
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <Pagination
+                  pagination={userPagination}
+                  onPageChange={handleUserPageChange}
+                />
+              </>
             )}
           </div>
         )}
       </div>
 
-      {/* Modals */}
+      {/* ── Modals ──────────────────────────────────────────────── */}
       <Modal
         isOpen={modal.type === "edit"}
         onClose={() => setModal({ type: null })}
@@ -728,6 +920,20 @@ export default function ProfilPage() {
         size="md"
       >
         <CreateUserForm onSubmit={handleCreateUser} loading={submitting} />
+      </Modal>
+
+      <Modal
+        isOpen={modal.type === "delete-user"}
+        onClose={() => setModal({ type: null })}
+        title="Hapus User"
+        size="sm"
+      >
+        <ConfirmDeleteModal
+          user={modal.data}
+          onConfirm={handleDeleteUser}
+          onClose={() => setModal({ type: null })}
+          loading={submitting}
+        />
       </Modal>
     </div>
   );

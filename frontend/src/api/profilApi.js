@@ -12,4 +12,5 @@ export const profilApi = {
   getAllUsers: (params) => api.get("/profil/users", { params }),
   createUser: (data) => api.post("/profil/users", data),
   updateUser: (id, data) => api.patch(`/profil/users/${id}`, data),
+  deleteUser: (id) => api.delete(`/profil/users/${id}`),
 };

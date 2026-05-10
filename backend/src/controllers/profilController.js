@@ -15,11 +15,19 @@ const getProfil = async (req, res) => {
       [req.user.id],
     );
 
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "User tidak ditemukan",
+      });
+    }
+
     res.status(200).json({
       success: true,
       data: result.rows[0],
     });
   } catch (err) {
+    console.error("getProfil error:", err.message);
     res.status(500).json({
       success: false,
       message: "Terjadi kesalahan server",
@@ -39,6 +47,9 @@ const updateProfil = async (req, res) => {
     ]);
 
     if (existing.rows.length === 0) {
+      if (req.file && fs.existsSync(req.file.path)) {
+        fs.unlinkSync(req.file.path);
+      }
       return res.status(404).json({
         success: false,
         message: "User tidak ditemukan",
@@ -52,6 +63,9 @@ const updateProfil = async (req, res) => {
         [email, req.user.id],
       );
       if (emailCheck.rows.length > 0) {
+        if (req.file && fs.existsSync(req.file.path)) {
+          fs.unlinkSync(req.file.path);
+        }
         return res.status(400).json({
           success: false,
           message: "Email sudah digunakan",
@@ -62,6 +76,7 @@ const updateProfil = async (req, res) => {
     let fotoPath = existing.rows[0].foto;
 
     if (req.file) {
+      // Hapus foto lama jika ada
       if (existing.rows[0].foto) {
         const oldPath = path.join(__dirname, "../../", existing.rows[0].foto);
         if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
@@ -72,10 +87,10 @@ const updateProfil = async (req, res) => {
     const result = await query(
       `UPDATE users 
        SET nama_lengkap = $1, email = $2, jabatan = $3, no_hp = $4, 
-           alamat = $5, catatan = $6, foto = $7
+           alamat = $5, catatan = $6, foto = $7, updated_at = NOW()
        WHERE id = $8
        RETURNING id, nama_lengkap, username, email, jabatan, status, 
-                 no_hp, alamat, foto, hak_akses, catatan, last_login, created_at`,
+                 no_hp, alamat, foto, hak_akses, catatan, last_login, created_at, updated_at`,
       [
         nama_lengkap || existing.rows[0].nama_lengkap,
         email || existing.rows[0].email,
@@ -100,6 +115,7 @@ const updateProfil = async (req, res) => {
       data: result.rows[0],
     });
   } catch (err) {
+    console.error("updateProfil error:", err.message);
     if (req.file && fs.existsSync(req.file.path)) {
       fs.unlinkSync(req.file.path);
     }
@@ -145,6 +161,7 @@ const getRiwayatAktivitas = async (req, res) => {
       },
     });
   } catch (err) {
+    console.error("getRiwayatAktivitas error:", err.message);
     res.status(500).json({
       success: false,
       message: "Terjadi kesalahan server",
@@ -171,6 +188,7 @@ const getPerangkatLogin = async (req, res) => {
       data: result.rows,
     });
   } catch (err) {
+    console.error("getPerangkatLogin error:", err.message);
     res.status(500).json({
       success: false,
       message: "Terjadi kesalahan server",
@@ -186,8 +204,8 @@ const getAllUsers = async (req, res) => {
   const offset = (parseInt(page) - 1) * parseInt(limit);
 
   try {
-    let whereClause = "WHERE 1=1";
     const params = [];
+    let whereClause = "WHERE 1=1";
     let paramCount = 1;
 
     if (search) {
@@ -222,6 +240,7 @@ const getAllUsers = async (req, res) => {
       },
     });
   } catch (err) {
+    console.error("getAllUsers error:", err.message);
     res.status(500).json({
       success: false,
       message: "Terjadi kesalahan server",
@@ -251,6 +270,13 @@ const createUser = async (req, res) => {
     });
   }
 
+  if (password.length < 6) {
+    return res.status(400).json({
+      success: false,
+      message: "Password minimal 6 karakter",
+    });
+  }
+
   try {
     const hashedPassword = await bcrypt.hash(password, 10);
 
@@ -263,10 +289,10 @@ const createUser = async (req, res) => {
         username,
         email,
         hashedPassword,
-        jabatan,
+        jabatan || null,
         hak_akses || "user",
-        no_hp,
-        alamat,
+        no_hp || null,
+        alamat || null,
       ],
     );
 
@@ -282,6 +308,7 @@ const createUser = async (req, res) => {
       data: result.rows[0],
     });
   } catch (err) {
+    console.error("createUser error:", err.message);
     if (err.code === "23505") {
       return res.status(400).json({
         success: false,
@@ -301,6 +328,14 @@ const createUser = async (req, res) => {
 const updateUserAdmin = async (req, res) => {
   const { status, hak_akses, jabatan } = req.body;
 
+  // Cegah admin mengubah dirinya sendiri via endpoint ini
+  if (parseInt(req.params.id) === req.user.id) {
+    return res.status(403).json({
+      success: false,
+      message: "Tidak dapat mengubah data akun sendiri melalui endpoint ini",
+    });
+  }
+
   try {
     const checkResult = await query("SELECT * FROM users WHERE id = $1", [
       req.params.id,
@@ -317,14 +352,24 @@ const updateUserAdmin = async (req, res) => {
 
     const result = await query(
       `UPDATE users 
-       SET status = $1, hak_akses = $2, jabatan = $3
+       SET status = $1, hak_akses = $2, jabatan = $3, updated_at = NOW()
        WHERE id = $4
-       RETURNING id, nama_lengkap, username, email, jabatan, hak_akses, status`,
+       RETURNING id, nama_lengkap, username, email, jabatan, hak_akses, status, updated_at`,
       [
         status || existing.status,
         hak_akses || existing.hak_akses,
         jabatan !== undefined ? jabatan : existing.jabatan,
         req.params.id,
+      ],
+    );
+
+    await query(
+      `INSERT INTO activity_log (user_id, aksi, modul, deskripsi, ip_address)
+       VALUES ($1, 'EDIT_USER', 'PROFIL', $2, $3)`,
+      [
+        req.user.id,
+        `Admin mengubah user: ${existing.username} (ID: ${req.params.id})`,
+        req.ip,
       ],
     );
 
@@ -334,6 +379,64 @@ const updateUserAdmin = async (req, res) => {
       data: result.rows[0],
     });
   } catch (err) {
+    console.error("updateUserAdmin error:", err.message);
+    res.status(500).json({
+      success: false,
+      message: "Terjadi kesalahan server",
+    });
+  }
+};
+
+// @desc    Delete user (admin only)
+// @route   DELETE /api/profil/users/:id
+// @access  Private (admin)
+const deleteUser = async (req, res) => {
+  // Cegah admin menghapus dirinya sendiri
+  if (parseInt(req.params.id) === req.user.id) {
+    return res.status(403).json({
+      success: false,
+      message: "Tidak dapat menghapus akun sendiri",
+    });
+  }
+
+  try {
+    const checkResult = await query("SELECT * FROM users WHERE id = $1", [
+      req.params.id,
+    ]);
+
+    if (checkResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "User tidak ditemukan",
+      });
+    }
+
+    const existing = checkResult.rows[0];
+
+    // Hapus foto jika ada
+    if (existing.foto) {
+      const fotoPath = path.join(__dirname, "../../", existing.foto);
+      if (fs.existsSync(fotoPath)) fs.unlinkSync(fotoPath);
+    }
+
+    await query("DELETE FROM users WHERE id = $1", [req.params.id]);
+
+    await query(
+      `INSERT INTO activity_log (user_id, aksi, modul, deskripsi, ip_address)
+       VALUES ($1, 'HAPUS_USER', 'PROFIL', $2, $3)`,
+      [
+        req.user.id,
+        `Admin menghapus user: ${existing.username} (ID: ${req.params.id})`,
+        req.ip,
+      ],
+    );
+
+    res.status(200).json({
+      success: true,
+      message: "User berhasil dihapus",
+    });
+  } catch (err) {
+    console.error("deleteUser error:", err.message);
     res.status(500).json({
       success: false,
       message: "Terjadi kesalahan server",
@@ -349,4 +452,5 @@ module.exports = {
   getAllUsers,
   createUser,
   updateUserAdmin,
+  deleteUser,
 };

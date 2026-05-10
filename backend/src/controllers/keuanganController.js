@@ -17,6 +17,8 @@ const getAllKeuangan = async (req, res) => {
   } = req.query;
 
   const offset = (parseInt(page) - 1) * parseInt(limit);
+
+  // Whitelist sort columns with table prefix to prevent SQL injection
   const allowedSort = [
     "nama_dokumen",
     "jenis_dokumen",
@@ -25,39 +27,41 @@ const getAllKeuangan = async (req, res) => {
     "nominal",
     "created_at",
   ];
-  const sortField = allowedSort.includes(sort) ? sort : "created_at";
+  const sortField = allowedSort.includes(sort) ? `kd.${sort}` : "kd.created_at";
   const sortOrder = order.toUpperCase() === "ASC" ? "ASC" : "DESC";
 
   try {
-    let whereClause = "WHERE status != 'hapus'";
+    // Prefix all columns with table alias to avoid JOIN ambiguity
+    let whereClause = "WHERE kd.status != 'hapus'";
     const params = [];
     let paramCount = 1;
 
     if (search) {
-      whereClause += ` AND nama_dokumen ILIKE $${paramCount}`;
+      whereClause += ` AND kd.nama_dokumen ILIKE $${paramCount}`;
       params.push(`%${search}%`);
       paramCount++;
     }
 
     if (jenis) {
-      whereClause += ` AND jenis_dokumen = $${paramCount}`;
+      whereClause += ` AND kd.jenis_dokumen = $${paramCount}`;
       params.push(jenis);
       paramCount++;
     }
 
     if (tahun) {
-      whereClause += ` AND tahun = $${paramCount}`;
+      whereClause += ` AND kd.tahun = $${paramCount}`;
       params.push(tahun);
       paramCount++;
     }
 
+    // Count query without JOIN for better performance
     const countResult = await query(
-      `SELECT COUNT(*) FROM keuangan_desa ${whereClause}`,
+      `SELECT COUNT(*) FROM keuangan_desa kd ${whereClause}`,
       params,
     );
 
     const dataResult = await query(
-      `SELECT kd.*, u.nama_lengkap as nama_pembuat
+      `SELECT kd.*, u.nama_lengkap AS nama_pembuat
        FROM keuangan_desa kd
        LEFT JOIN users u ON kd.dibuat_oleh = u.id
        ${whereClause}
@@ -67,6 +71,7 @@ const getAllKeuangan = async (req, res) => {
     );
 
     const total = parseInt(countResult.rows[0].count);
+    const totalPages = Math.ceil(total / parseInt(limit));
 
     res.status(200).json({
       success: true,
@@ -75,12 +80,13 @@ const getAllKeuangan = async (req, res) => {
         total,
         page: parseInt(page),
         limit: parseInt(limit),
-        total_pages: Math.ceil(total / parseInt(limit)),
-        has_next: parseInt(page) < Math.ceil(total / parseInt(limit)),
+        total_pages: totalPages,
+        has_next: parseInt(page) < totalPages,
         has_prev: parseInt(page) > 1,
       },
     });
   } catch (err) {
+    console.error("getAllKeuangan error:", err.message);
     res.status(500).json({
       success: false,
       message: "Terjadi kesalahan server",
@@ -94,7 +100,7 @@ const getAllKeuangan = async (req, res) => {
 const getKeuanganById = async (req, res) => {
   try {
     const result = await query(
-      `SELECT kd.*, u.nama_lengkap as nama_pembuat
+      `SELECT kd.*, u.nama_lengkap AS nama_pembuat
        FROM keuangan_desa kd
        LEFT JOIN users u ON kd.dibuat_oleh = u.id
        WHERE kd.id = $1 AND kd.status != 'hapus'`,
@@ -113,6 +119,7 @@ const getKeuanganById = async (req, res) => {
       data: result.rows[0],
     });
   } catch (err) {
+    console.error("getKeuanganById error:", err.message);
     res.status(500).json({
       success: false,
       message: "Terjadi kesalahan server",
@@ -122,16 +129,31 @@ const getKeuanganById = async (req, res) => {
 
 // @desc    Create dokumen keuangan
 // @route   POST /api/keuangan
-// @access  Private
+// @access  Private (admin/user)
 const createKeuangan = async (req, res) => {
   const { nama_dokumen, jenis_dokumen, tahun, tanggal, nominal, deskripsi } =
     req.body;
 
   if (!nama_dokumen || !jenis_dokumen || !tahun || !tanggal) {
-    if (req.file) fs.unlinkSync(req.file.path);
+    if (req.file && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
     return res.status(400).json({
       success: false,
       message: "Nama dokumen, jenis, tahun, dan tanggal wajib diisi",
+    });
+  }
+
+  // Validate nominal is a non-negative number when provided
+  const nominalValue =
+    nominal !== undefined && nominal !== "" ? parseFloat(nominal) : null;
+  if (nominalValue !== null && (isNaN(nominalValue) || nominalValue < 0)) {
+    if (req.file && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
+    return res.status(400).json({
+      success: false,
+      message: "Nominal harus berupa angka positif",
     });
   }
 
@@ -149,18 +171,18 @@ const createKeuangan = async (req, res) => {
     }
 
     const result = await query(
-      `INSERT INTO keuangan_desa 
-       (nama_dokumen, jenis_dokumen, tahun, tanggal, nominal, deskripsi, 
+      `INSERT INTO keuangan_desa
+       (nama_dokumen, jenis_dokumen, tahun, tanggal, nominal, deskripsi,
         file_path, file_name, file_size, file_type, dibuat_oleh)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
        RETURNING *`,
       [
         nama_dokumen,
         jenis_dokumen,
-        tahun,
+        parseInt(tahun),
         tanggal,
-        nominal || null,
-        deskripsi,
+        nominalValue,
+        deskripsi || null,
         filePath,
         fileName,
         fileSize,
@@ -181,6 +203,7 @@ const createKeuangan = async (req, res) => {
       data: result.rows[0],
     });
   } catch (err) {
+    console.error("createKeuangan error:", err.message);
     if (req.file && fs.existsSync(req.file.path)) {
       fs.unlinkSync(req.file.path);
     }
@@ -193,7 +216,7 @@ const createKeuangan = async (req, res) => {
 
 // @desc    Update dokumen keuangan
 // @route   PUT /api/keuangan/:id
-// @access  Private
+// @access  Private (admin/user)
 const updateKeuangan = async (req, res) => {
   const {
     nama_dokumen,
@@ -212,7 +235,9 @@ const updateKeuangan = async (req, res) => {
     );
 
     if (checkResult.rows.length === 0) {
-      if (req.file) fs.unlinkSync(req.file.path);
+      if (req.file && fs.existsSync(req.file.path)) {
+        fs.unlinkSync(req.file.path);
+      }
       return res.status(404).json({
         success: false,
         message: "Dokumen keuangan tidak ditemukan",
@@ -226,6 +251,7 @@ const updateKeuangan = async (req, res) => {
     let fileType = existing.file_type;
 
     if (req.file) {
+      // Hapus file lama jika ada
       if (existing.file_path) {
         const oldFilePath = path.join(__dirname, "../../", existing.file_path);
         if (fs.existsSync(oldFilePath)) fs.unlinkSync(oldFilePath);
@@ -236,25 +262,36 @@ const updateKeuangan = async (req, res) => {
       fileType = req.file.mimetype;
     }
 
+    // Parse nominal safely
+    const nominalValue =
+      nominal !== undefined && nominal !== ""
+        ? parseFloat(nominal)
+        : existing.nominal;
+
+    // Validate status
+    const allowedStatus = ["aktif", "arsip"];
+    const newStatus =
+      status && allowedStatus.includes(status) ? status : existing.status;
+
     const result = await query(
-      `UPDATE keuangan_desa 
+      `UPDATE keuangan_desa
        SET nama_dokumen = $1, jenis_dokumen = $2, tahun = $3, tanggal = $4,
            nominal = $5, deskripsi = $6, file_path = $7, file_name = $8,
-           file_size = $9, file_type = $10, status = $11
+           file_size = $9, file_type = $10, status = $11, updated_at = NOW()
        WHERE id = $12
        RETURNING *`,
       [
         nama_dokumen || existing.nama_dokumen,
         jenis_dokumen || existing.jenis_dokumen,
-        tahun || existing.tahun,
+        tahun ? parseInt(tahun) : existing.tahun,
         tanggal || existing.tanggal,
-        nominal !== undefined ? nominal : existing.nominal,
+        nominalValue,
         deskripsi !== undefined ? deskripsi : existing.deskripsi,
         filePath,
         fileName,
         fileSize,
         fileType,
-        status || existing.status,
+        newStatus,
         req.params.id,
       ],
     );
@@ -275,6 +312,7 @@ const updateKeuangan = async (req, res) => {
       data: result.rows[0],
     });
   } catch (err) {
+    console.error("updateKeuangan error:", err.message);
     if (req.file && fs.existsSync(req.file.path)) {
       fs.unlinkSync(req.file.path);
     }
@@ -287,7 +325,7 @@ const updateKeuangan = async (req, res) => {
 
 // @desc    Delete dokumen keuangan (soft delete)
 // @route   DELETE /api/keuangan/:id
-// @access  Private
+// @access  Private (admin/user)
 const deleteKeuangan = async (req, res) => {
   try {
     const result = await query(
@@ -302,9 +340,10 @@ const deleteKeuangan = async (req, res) => {
       });
     }
 
-    await query("UPDATE keuangan_desa SET status = 'hapus' WHERE id = $1", [
-      req.params.id,
-    ]);
+    await query(
+      "UPDATE keuangan_desa SET status = 'hapus', updated_at = NOW() WHERE id = $1",
+      [req.params.id],
+    );
 
     await query(
       `INSERT INTO activity_log (user_id, aksi, modul, deskripsi, ip_address)
@@ -321,6 +360,7 @@ const deleteKeuangan = async (req, res) => {
       message: "Dokumen keuangan berhasil dihapus",
     });
   } catch (err) {
+    console.error("deleteKeuangan error:", err.message);
     res.status(500).json({
       success: false,
       message: "Terjadi kesalahan server",
@@ -338,14 +378,22 @@ const downloadKeuangan = async (req, res) => {
       [req.params.id],
     );
 
-    if (result.rows.length === 0 || !result.rows[0].file_path) {
+    if (result.rows.length === 0) {
       return res.status(404).json({
         success: false,
-        message: "File tidak ditemukan",
+        message: "Dokumen keuangan tidak ditemukan",
       });
     }
 
     const keuangan = result.rows[0];
+
+    if (!keuangan.file_path) {
+      return res.status(404).json({
+        success: false,
+        message: "File tidak tersedia untuk dokumen ini",
+      });
+    }
+
     const filePath = path.join(__dirname, "../../", keuangan.file_path);
 
     if (!fs.existsSync(filePath)) {
@@ -361,8 +409,9 @@ const downloadKeuangan = async (req, res) => {
       [req.user.id, `Download keuangan: ${keuangan.nama_dokumen}`, req.ip],
     );
 
-    res.download(filePath, keuangan.file_name);
+    res.download(filePath, keuangan.file_name || path.basename(filePath));
   } catch (err) {
+    console.error("downloadKeuangan error:", err.message);
     res.status(500).json({
       success: false,
       message: "Terjadi kesalahan server",
@@ -370,7 +419,7 @@ const downloadKeuangan = async (req, res) => {
   }
 };
 
-// @desc    Share link keuangan
+// @desc    Get share link for keuangan file
 // @route   GET /api/keuangan/:id/share
 // @access  Private
 const shareKeuangan = async (req, res) => {
@@ -388,6 +437,8 @@ const shareKeuangan = async (req, res) => {
     }
 
     const keuangan = result.rows[0];
+
+    // Build a publicly accessible URL (serves via express static /uploads)
     const shareUrl = keuangan.file_path
       ? `${req.protocol}://${req.get("host")}${keuangan.file_path}`
       : null;
@@ -402,6 +453,7 @@ const shareKeuangan = async (req, res) => {
       },
     });
   } catch (err) {
+    console.error("shareKeuangan error:", err.message);
     res.status(500).json({
       success: false,
       message: "Terjadi kesalahan server",
