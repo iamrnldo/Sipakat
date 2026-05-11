@@ -11,6 +11,7 @@ import {
 import { useAuth } from "../../hooks/useAuth";
 import { useToast } from "../../hooks/useToast";
 import { getInitials } from "../../utils/formatters";
+import logo from "../../assets/logo2.png";
 
 const navItems = [
   { to: "/dashboard", icon: HiHome, label: "Dashboard" },
@@ -54,12 +55,18 @@ export default function Sidebar({ isOpen, onClose }) {
         {/* Logo */}
         <div className="px-5 py-6 border-b border-white/10">
           <div className="flex items-center gap-3">
-            <div className="h-10 w-10 bg-white/20 rounded-xl flex items-center justify-center">
-              <HiArchiveBox className="h-6 w-6 text-white" />
+            <div className="h-10 w-10 rounded-xl flex items-center justify-center shrink-0 overflow-hidden">
+              <img
+                src={logo}
+                alt="SIPAKAT"
+                className="h-10 w-10 object-contain"
+              />
             </div>
             <div>
-              <h1 className="text-lg font-bold tracking-wide">SIPAKAT</h1>
-              <p className="text-xs text-blue-200">Sistem Pengarsipan</p>
+              <h1 className="text-lg font-bold tracking-wide">
+                Desa Keterungan
+              </h1>
+              <p className="text-xs text-blue-200">Kec Krian Sidoarjo</p>
             </div>
           </div>
         </div>
