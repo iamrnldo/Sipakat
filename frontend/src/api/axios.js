@@ -1,36 +1,36 @@
 import axios from "axios";
-import toast from "react-hot-toast";
 
-const instance = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || "http://localhost:5000/api",
-  timeout: 30000,
-  headers: { "Content-Type": "application/json" },
+const api = axios.create({
+  baseURL: "/api", // Vite proxy akan forward ke localhost:5000
 });
 
-instance.interceptors.request.use(
+// ✅ FIX 3: Interceptor request — selalu sertakan token JWT
+api.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem("sipakat_token");
-    if (token) config.headers.Authorization = `Bearer ${token}`;
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
     return config;
   },
   (error) => Promise.reject(error),
 );
 
-instance.interceptors.response.use(
+// ✅ FIX 3: Interceptor response — handle token expired / invalid
+api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
+      // Token expired atau tidak valid → bersihkan storage & redirect login
       localStorage.removeItem("sipakat_token");
       localStorage.removeItem("sipakat_user");
-      toast.error("Sesi habis. Silakan login kembali");
-      window.location.href = "/login";
-    } else if (error.response?.status === 403) {
-      toast.error("Akses ditolak");
-    } else if (error.response?.status === 500) {
-      toast.error("Terjadi kesalahan server");
+      // Hindari redirect loop jika sudah di halaman login
+      if (window.location.pathname !== "/login") {
+        window.location.href = "/login";
+      }
     }
     return Promise.reject(error);
   },
 );
 
-export default instance;
+export default api;

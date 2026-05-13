@@ -55,17 +55,18 @@ const login = async (req, res) => {
     });
   }
 
+  // ✅ FIX 1: Normalisasi identifier sekali di awal, konsisten untuk username & email
+  const identifier = username.trim().toLowerCase();
+  const isEmail = identifier.includes("@");
   const deviceInfo = getDeviceInfo(req);
 
   try {
-    // Accept username OR email — detect by presence of "@"
-    const isEmail = username.includes("@");
     const result = await query(
       `SELECT id, nama_lengkap, username, email, password, jabatan,
               hak_akses, status, foto, no_hp, alamat
        FROM users
        WHERE ${isEmail ? "email" : "username"} = $1`,
-      [username.trim().toLowerCase()],
+      [identifier],
     );
 
     if (result.rows.length === 0) {
@@ -78,7 +79,9 @@ const login = async (req, res) => {
 
     const user = result.rows[0];
 
+    // ✅ FIX 2: Log attempt untuk akun nonaktif sebelum return
     if (user.status === "nonaktif") {
+      await logLoginAttempt(user.id, deviceInfo, "failed");
       return res.status(403).json({
         success: false,
         message: "Akun Anda telah dinonaktifkan. Hubungi administrator",

@@ -7,25 +7,25 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // Restore session on mount
+  // ✅ FIX 4: Tidak langsung set user dari localStorage — verifikasi ke server dulu
+  // Mencegah race condition dan penggunaan data user yang sudah stale
   useEffect(() => {
     const token = localStorage.getItem("sipakat_token");
-    const saved = localStorage.getItem("sipakat_user");
-    if (token && saved) {
-      setUser(JSON.parse(saved));
-      // Verify token still valid
-      authApi
-        .getMe()
-        .then((r) => setUser(r.data.data))
-        .catch(() => {
-          localStorage.removeItem("sipakat_token");
-          localStorage.removeItem("sipakat_user");
-          setUser(null);
-        })
-        .finally(() => setLoading(false));
-    } else {
+
+    if (!token) {
       setLoading(false);
+      return;
     }
+
+    authApi
+      .getMe()
+      .then((r) => setUser(r.data.data))
+      .catch(() => {
+        localStorage.removeItem("sipakat_token");
+        localStorage.removeItem("sipakat_user");
+        setUser(null);
+      })
+      .finally(() => setLoading(false));
   }, []);
 
   const login = useCallback(async (username, password) => {
@@ -40,7 +40,9 @@ export function AuthProvider({ children }) {
   const logout = useCallback(async () => {
     try {
       await authApi.logout();
-    } catch (_) {}
+    } catch (_) {
+      // Tetap lanjutkan logout meskipun request gagal
+    }
     localStorage.removeItem("sipakat_token");
     localStorage.removeItem("sipakat_user");
     setUser(null);

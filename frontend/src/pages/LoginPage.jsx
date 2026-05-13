@@ -17,17 +17,35 @@ export default function LoginPage() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!form.username || !form.password) {
+
+    // ✅ Trim input sebelum validasi
+    const username = form.username.trim();
+    const password = form.password;
+
+    if (!username || !password) {
       toast.error("Username/email dan password wajib diisi");
       return;
     }
+
     setLoading(true);
     try {
-      await login(form.username, form.password);
+      await login(username, password);
       toast.success("Login berhasil! Selamat datang");
       navigate("/dashboard");
     } catch (err) {
-      toast.error(err.response?.data?.message || "Login gagal");
+      // ✅ FIX: Handle berbagai status error dengan pesan yang tepat
+      const status = err.response?.status;
+      const message = err.response?.data?.message;
+
+      if (status === 401) {
+        toast.error(message || "Username/email atau password salah");
+      } else if (status === 403) {
+        toast.error(message || "Akun Anda tidak memiliki akses");
+      } else if (status === 429) {
+        toast.error("Terlalu banyak percobaan login. Coba lagi nanti");
+      } else {
+        toast.error(message || "Login gagal. Periksa koneksi Anda");
+      }
     } finally {
       setLoading(false);
     }
@@ -43,7 +61,7 @@ export default function LoginPage() {
         backgroundRepeat: "no-repeat",
       }}
     >
-      {/* Dark overlay agar card tetap terbaca */}
+      {/* Dark overlay */}
       <div className="absolute inset-0 bg-blue-900/60" />
 
       <div className="relative z-10 w-full max-w-md animate-fade-in">
@@ -55,7 +73,7 @@ export default function LoginPage() {
               <img
                 src={logo}
                 alt="SIPAKAT"
-                className="h-26 w-auto object-contain "
+                className="h-26 w-auto object-contain"
               />
             </div>
           </div>
@@ -85,6 +103,7 @@ export default function LoginPage() {
                     className="input-field pl-10"
                     autoComplete="username"
                     autoCapitalize="none"
+                    disabled={loading}
                   />
                 </div>
               </div>
@@ -103,11 +122,13 @@ export default function LoginPage() {
                     }
                     className="input-field pl-10 pr-10"
                     autoComplete="current-password"
+                    disabled={loading}
                   />
                   <button
                     type="button"
                     onClick={() => setShowPw(!showPw)}
                     className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                    tabIndex={-1}
                   >
                     {showPw ? (
                       <HiEyeSlash className="h-4 w-4" />
@@ -139,8 +160,13 @@ export default function LoginPage() {
             <div className="mt-6 p-3 bg-slate-50 rounded-xl border border-slate-100 text-center">
               <p className="text-xs text-slate-400">
                 Sipakat:{" "}
-                <span className="font-semibold text-slate-600">lebih terlindungi</span> /{" "}
-                <span className="font-semibold text-slate-600">lebih nyaman</span>
+                <span className="font-semibold text-slate-600">
+                  lebih terlindungi
+                </span>{" "}
+                /{" "}
+                <span className="font-semibold text-slate-600">
+                  lebih nyaman
+                </span>
               </p>
             </div>
           </div>
